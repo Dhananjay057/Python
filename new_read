@@ -122,3 +122,120 @@ results = process_files_from_zip(BUCKET_NAME, ZIP_FILE_PATH)
 
 # Print or save as structured JSON
 print(json.dumps(results, indent=2))
+
+
+
+------------------------------------------------------------------------------------------------------------
+
+# -------------------------------
+# INSTALL DEPENDENCIES
+# -------------------------------
+!pip install --upgrade google-cloud-storage vertexai pypdf
+
+# -------------------------------
+# IMPORT LIBRARIES
+# -------------------------------
+from google.cloud import storage
+from vertexai.preview.generative_models import GenerativeModel
+from pypdf import PdfReader
+import zipfile
+import io
+
+# -------------------------------
+# CONFIGURATION
+# -------------------------------
+BUCKET_NAME = "your-bucket-name"  # 🔁 Change this
+ZIP_FILE_PATH = "path/in/bucket/yourfile.zip"  # 🔁 Change this
+MODEL_NAME = "gemini-2.5-pro"
+
+# -------------------------------
+# DOWNLOAD & EXTRACT PDF FILES FROM ZIP
+# -------------------------------
+def download_and_extract_pdfs(bucket_name, zip_path):
+    print("📦 Downloading and extracting PDF files...")
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(zip_path)
+    zip_bytes = blob.download_as_bytes()
+
+    zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    pdf_files = {}
+
+    for name in zip_file.namelist():
+        if name.endswith('.pdf') and not name.startswith('__MACOSX'):
+            with zip_file.open(name) as file:
+                pdf_files[name] = file.read()
+    
+    print(f"✅ Extracted {len(pdf_files)} PDF file(s).")
+    return pdf_files
+
+# -------------------------------
+# EXTRACT TEXT FROM PDF
+# -------------------------------
+def extract_text_from_pdf(pdf_bytes):
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    text = ""
+    for page in reader.pages:
+        content = page.extract_text()
+        if content:
+            text += content + "\n"
+    return text
+
+# -------------------------------
+# SUMMARIZE ALL PDF TEXT USING GEMINI-2.5-PRO
+# -------------------------------
+def summarize_pdf_texts(pdf_texts_dict, model_name=MODEL_NAME):
+    print("🧠 Sending content to Gemini-2.5-Pro...")
+    model = GenerativeModel(model_name)
+
+    combined_text = ""
+    for filename, text in pdf_texts_dict.items():
+        combined_text += f"\n\n==== FILE: {filename} ====\n{text}\n"
+
+    prompt = f"""
+You are a document analysis system. Multiple PDF files have been extracted and merged.
+
+Each file starts with:
+==== FILE: filename.pdf ====
+
+For each file, return a structured JSON summary in this format:
+
+{{
+  "filename.pdf": {{
+    "Title": "...",
+    "Key Points": ["...", "..."],
+    "Entities": ["...", "..."],
+    "Summary": "..."
+  }}
+}}
+
+Here is the content:
+{combined_text[:950000]}  # Safe limit under 1M tokens
+"""
+
+    response = model.generate_content(prompt)
+    return response.text
+
+# -------------------------------
+# RUN THE PIPELINE
+# -------------------------------
+def run_pdf_summary_pipeline(bucket, zip_path):
+    pdf_files = download_and_extract_pdfs(bucket, zip_path)
+
+    pdf_texts = {}
+    for filename, pdf_bytes in pdf_files.items():
+        text = extract_text_from_pdf(pdf_bytes)
+        if text:
+            pdf_texts[filename] = text
+
+    summary = summarize_pdf_texts(pdf_texts)
+    return summary
+
+# -------------------------------
+# MAIN EXECUTION
+# -------------------------------
+if __name__ == "__main__":
+    summary_result = run_pdf_summary_pipeline(BUCKET_NAME, ZIP_FILE_PATH)
+    print("📤 Final Summary Output:\n")
+    print(summary_result)
+
