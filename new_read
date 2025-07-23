@@ -1,0 +1,124 @@
+!pip install --upgrade google-cloud-storage vertexai pypdf python-docx
+
+# import libraries
+from google.cloud import storage
+from vertexai.preview.generative_models import GenerativeModel
+import zipfile
+import io
+import os
+import tempfile
+from pypdf import PdfReader
+from docx import Document
+import json
+
+# Set Parameters
+
+BUCKET_NAME = "your-bucket-name"
+ZIP_FILE_PATH = "path/in/bucket/yourfile.zip"
+MODEL_NAME = "gemini-2.5-pro" 
+
+
+# Download ZIP from GCS and Extract Files
+def download_and_extract_zip(bucket_name, zip_path):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(zip_path)
+    zip_bytes = blob.download_as_bytes()
+    zip_file = zipfile.ZipFile(io.BytesIO(zip_bytes))
+
+    extracted_files = {}
+    for name in zip_file.namelist():
+        if not name.endswith('/'):
+            with zip_file.open(name) as file:
+                extracted_files[name] = file.read()
+    return extracted_files
+	
+# chunking hwlpers
+
+def chunk_text(text, max_chars=12000):
+    chunks = []
+    while len(text) > max_chars:
+        split_index = text.rfind("\n", 0, max_chars)
+        if split_index == -1:
+            split_index = max_chars
+        chunks.append(text[:split_index])
+        text = text[split_index:]
+    chunks.append(text)
+    return chunks
+	
+def get_structured_summary_from_chunks(text, model_name=MODEL_NAME):
+    model = GenerativeModel(model_name)
+    chunks = chunk_text(text)
+    aggregated_output = []
+
+    for idx, chunk in enumerate(chunks):
+        print(f"Processing chunk {idx + 1}/{len(chunks)}")
+        prompt = f"""
+You are a powerful document parser. Extract structured information from the following content.
+Organize the output in JSON-like format with the following keys:
+- "Title"
+- "Key Points"
+- "Entities" (names, organizations, dates, values)
+- "Summary"
+
+Here is the content chunk:
+{chunk}
+"""
+        response = model.generate_content(prompt)
+        aggregated_output.append(response.text.strip())
+
+    return "\n\n---\n\n".join(aggregated_output)
+	
+# file Readers
+
+def extract_text_from_pdf(content_bytes):
+    reader = PdfReader(io.BytesIO(content_bytes))
+    return "\n".join(page.extract_text() or '' for page in reader.pages)
+
+def extract_text_from_docx(content_bytes):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+        tmp.write(content_bytes)
+        tmp_path = tmp.name
+    doc = Document(tmp_path)
+    os.remove(tmp_path)
+    return "\n".join(p.text for p in doc.paragraphs)
+
+def extract_text(filename, content_bytes):
+    try:
+        if filename.endswith('.txt'):
+            return content_bytes.decode('utf-8')
+        elif filename.endswith('.pdf'):
+            return extract_text_from_pdf(content_bytes)
+        elif filename.endswith('.docx'):
+            return extract_text_from_docx(content_bytes)
+        else:
+            return None
+    except Exception as e:
+        print(f"Error reading {filename}: {e}")
+        return None
+
+# Master Loop: Extract + Chunk + Process
+
+def process_files_from_zip(bucket, zip_path):
+    files = download_and_extract_zip(bucket, zip_path)
+    structured_outputs = {}
+
+    for filename, content in files.items():
+        print(f"\n📂 Processing: {filename}")
+        text = extract_text(filename, content)
+
+        if text:
+            summary = get_structured_summary_from_chunks(text)
+        else:
+            summary = "❌ Unsupported or unreadable file type."
+        
+        structured_outputs[filename] = summary
+
+    return structured_outputs
+	
+	
+# Run the prpieline
+results = process_files_from_zip(BUCKET_NAME, ZIP_FILE_PATH)
+
+# Print or save as structured JSON
+print(json.dumps(results, indent=2))
