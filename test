@@ -1,0 +1,96 @@
+import zipfile
+import os
+from google.cloud import storage
+from vertexai.generative_models import GenerativeModel, Part
+from vertexai import init
+
+# ---------------------------------------------
+# Step 0: Init Vertex AI (Update your project ID)
+# ---------------------------------------------
+
+init(project="bhsf-ai-team-projects", location="us-east1")
+
+# ---------------------------------------------
+# Step 1: Download ZIP from GCS
+# ---------------------------------------------
+
+gcs_bucket = 'gcs-dev-use1-ai-storage-03'
+gcs_zip_path = 'intake-summary/Lung.zip'
+local_zip_path = '/tmp/Lung.zip'
+
+# Initialize the Google Cloud Storage client
+storage_client = storage.Client()
+bucket = storage_client.bucket(gcs_bucket)
+blob = bucket.blob(gcs_zip_path)
+blob.download_to_filename(local_zip_path)
+
+# ---------------------------------------------
+# Step 2: Extract all PDFs and summarize each
+# ---------------------------------------------
+
+summary_outputs = []
+raw_texts = []  # To store raw text extracted from PDFs
+model = GenerativeModel("gemini-2.5-flash-lite")  # Specify your model
+
+# Read the custom prompt from the prompt.txt file
+with open("prompt.txt", "r") as f:
+    prompt = f.read().strip()  # Strip to remove any leading/trailing whitespace
+
+with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+    # List all files in the ZIP and filter for PDFs
+    all_files = zip_ref.namelist()
+    pdf_files = [f for f in all_files if f.lower().endswith(".pdf")]
+    
+    total_files = len(pdf_files)
+    
+    for idx, pdf_file in enumerate(pdf_files, 1):
+        # Log the processing status (file name and progress)
+        print(f"Processing ({idx}/{total_files}): {pdf_file}")
+        
+        # Extract each PDF file to a temporary path
+        extracted_path = f"/tmp/pdf_{idx}.pdf"
+        zip_ref.extract(pdf_file, path="/tmp")
+        os.rename(f"/tmp/{pdf_file}", extracted_path)
+
+        # Read the extracted PDF file and create a Part object for Vertex AI
+        with open(extracted_path, "rb") as f:
+            pdf_part = Part.from_data(f.read(), mime_type="application/pdf")
+        
+        # Modify the prompt for the current PDF (optional customization)
+        current_prompt = f"{prompt} ({os.path.basename(pdf_file)}):"
+
+        # Generate content using Vertex AI model
+        response = model.generate_content(
+            [
+                current_prompt,  # Custom prompt for summarization
+                pdf_part,  # PDF content as Part object
+            ],
+            generation_config={"temperature": 0.4, "max_output_tokens": 1024},
+        )
+        
+        # Collect the summary result
+        summary_outputs.append(f"📄 **{pdf_file}**:\n{response.text.strip()}\n")
+        
+        # Extract raw text from PDF (for the raw file)
+        raw_text = f"Raw text from {pdf_file}:\n\n{response.text.strip()}"  # Keep the raw text as is
+        raw_texts.append(raw_text)
+
+# ---------------------------------------------
+# Step 3: Combine All Summaries and Raw Text
+# ---------------------------------------------
+
+# Combine summaries
+full_summary = "\n\n".join(summary_outputs)
+
+# Combine raw text
+full_raw_text = "\n\n".join(raw_texts)
+
+# Save the raw text to "all_pdf_texts.txt"
+with open("all_pdf_texts.txt", "w") as raw_text_file:
+    raw_text_file.write(full_raw_text)
+
+# Print the combined summary and raw text
+print("\nCombined Summary:\n")
+print(full_summary)
+
+print("\nCombined Raw Text has been saved to 'all_pdf_texts.txt'")
