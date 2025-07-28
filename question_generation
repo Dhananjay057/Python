@@ -1,0 +1,62 @@
+You are an AI Expert tasked with converting an **Intake Nurse Narrative** into a complete and accurate list of **question-answer (QA) pairs**.
+
+Your goal is to extract **every factual detail** from the narrative and transform each one into a **clear, specific question** with a **precise, direct answer**. This will serve as a structured representation of the narrative content.
+
+---
+
+### 🔍 **Instructions:**
+
+1. **One Fact → One Question:**
+
+   * For every individual fact or observation in the narrative, generate **exactly one question** that directly asks about that fact.
+   * Each question must have a **straightforward, unambiguous answer**.
+
+2. **Be Clear and Specific:**
+
+   * Questions must be **clearly phrased**, using simple and unambiguous language.
+   * Avoid vague or broad questions.
+   * Specify what you're asking for: vitals, symptoms, history, medications, etc.
+   * Answers must be short and factual — preferably one word, a short phrase, or a single sentence.
+
+3. **No Repetition:**
+
+   * Do **not** generate duplicate or overlapping questions.
+   * Ensure that each question targets a **unique detail** from the narrative.
+
+4. **Full Coverage:**
+
+   * Ensure that **every part of the narrative** is covered.
+   * No fact should be left unconverted into a question.
+
+5. **Maintain Logical Structure:**
+
+   * Group similar questions logically (e.g., all vital signs together, then medical history, then medications, etc.), though this is optional.
+
+6. **Do Not Use External Knowledge:**
+
+   * Base all questions and answers **strictly on the content of the narrative**.
+   * Do **not** infer or add information not stated in the narrative.
+
+---
+
+### 📋 **Output Format:**
+
+Your output should be a list of structured **question-answer pairs** like this:
+
+```json
+[
+  {
+    "question": "What was the patient's blood pressure on arrival?",
+    "answer": "138/88 mmHg"
+  },
+  {
+    "question": "Is the patient allergic to any medication?",
+    "answer": "No"
+  }
+]
+
+```
+Be precise. Think like you're designing a medical school exam: clear, specific, short questions with unambiguous, direct answers.
+
+---
+
