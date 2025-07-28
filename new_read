@@ -847,3 +847,124 @@ with open("combined_summary.txt", "w") as f:
     f.write(combined_summary)
 
 print("✅ Combined summary saved to 'combined_summary.txt'\n")
+
+
+---------------------------------------------------------------------------------
+#summary pipeline
+
+import os
+import io
+import zipfile
+import pdfplumber
+from google.cloud import storage
+from vertexai.generative_models import GenerativeModel
+from vertexai import init
+
+# -----------------------------------------------------
+# Step 0: Config & Init
+# -----------------------------------------------------
+PROJECT_ID = "bhsf-ai-team-projects"
+LOCATION = "us-east1"
+GCS_BUCKET = "gcs-dev-use1-ai-storage-03"
+ZIP_PATH_GCS = "intake-summary/Lung.zip"
+LOCAL_ZIP_PATH = "/tmp/Lung.zip"
+RAW_TEXT_FILE = "all_pdf_texts.txt"
+MODEL_NAME = "gemini-2.5-flash-lite"
+PROMPT_FILE = "prompt.txt"
+
+# -----------------------------------------------------
+# Init Vertex AI
+# -----------------------------------------------------
+def init_vertex_ai():
+    init(project=PROJECT_ID, location=LOCATION)
+
+# -----------------------------------------------------
+# Download ZIP from GCS
+# -----------------------------------------------------
+def download_zip_from_gcs(bucket_name, blob_path, destination_path):
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+    blob.download_to_filename(destination_path)
+    print(f"✅ Downloaded ZIP to: {destination_path}")
+
+# -----------------------------------------------------
+# Extract raw text from PDFs using pdfplumber
+# -----------------------------------------------------
+def extract_raw_text_from_zip(zip_path):
+    raw_texts = []
+
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        pdf_files = [f for f in zip_ref.namelist() if f.lower().endswith(".pdf")]
+        
+        for idx, pdf_file in enumerate(pdf_files, 1):
+            print(f"📄 Extracting text ({idx}/{len(pdf_files)}): {pdf_file}")
+            
+            with zip_ref.open(pdf_file) as f:
+                pdf_bytes = f.read()
+
+            text = ""
+            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+
+            raw_entry = f"==== {pdf_file} ====\n{text.strip()}"
+            raw_texts.append(raw_entry)
+
+    return raw_texts
+
+# -----------------------------------------------------
+# Save raw text to file
+# -----------------------------------------------------
+def save_text_to_file(text, filename):
+    with open(filename, "w") as f:
+        f.write(text)
+    print(f"💾 Saved raw text to: {filename}")
+
+# -----------------------------------------------------
+# Generate summary using Vertex AI
+# -----------------------------------------------------
+def generate_summary(prompt_text, full_raw_text):
+    model = GenerativeModel(MODEL_NAME)
+    combined_prompt = f"{prompt_text}\n\n{full_raw_text}"
+
+    response = model.generate_content(
+        combined_prompt,
+        generation_config={"temperature": 0.4, "max_output_tokens": 2048},
+    )
+
+    return response.text.strip()
+
+# -----------------------------------------------------
+# Load prompt from file
+# -----------------------------------------------------
+def load_prompt(prompt_path):
+    with open(prompt_path, "r") as f:
+        return f.read().strip()
+
+# -----------------------------------------------------
+# Main pipeline runner
+# -----------------------------------------------------
+def run_pipeline():
+    init_vertex_ai()
+    download_zip_from_gcs(GCS_BUCKET, ZIP_PATH_GCS, LOCAL_ZIP_PATH)
+    
+    raw_texts = extract_raw_text_from_zip(LOCAL_ZIP_PATH)
+    full_raw_text = "\n\n".join(raw_texts)
+    
+    save_text_to_file(full_raw_text, RAW_TEXT_FILE)
+
+    prompt = load_prompt(PROMPT_FILE)
+    print("✨ Generating combined summary...\n")
+    summary = generate_summary(prompt, full_raw_text)
+    
+    print("📝 Combined Summary:\n")
+    print(summary)
+
+# -----------------------------------------------------
+# Entry point
+# -----------------------------------------------------
+if __name__ == "__main__":
+    run_pipeline()
