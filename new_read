@@ -968,3 +968,141 @@ def run_pipeline():
 # -----------------------------------------------------
 if __name__ == "__main__":
     run_pipeline()
+
+
+---------------------------------------------------------------------
+
+metrics
+
+
+import json
+import re
+
+# ---------- Utility to clean model response ----------
+def clean_json_text(text):
+    # Strip markdown or code block formatting like ```json ... ```
+    return re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.IGNORECASE)
+
+# -------------------------------
+# IMPORT LIBRARIES
+# -------------------------------
+from vertexai.preview.generative_models import GenerativeModel
+import json
+
+# -------------------------------
+# CONFIG
+# -------------------------------
+MODEL_NAME = "gemini-2.5-pro"
+model = GenerativeModel(MODEL_NAME)
+
+# -------------------------------
+# IMPORT SUMMARY PIPELINE
+# -------------------------------
+from pdf_summary_pipeline import run_pipeline
+
+# -------------------------------
+# GENERATE EVALUATION QUESTIONS
+# -------------------------------
+def generate_eval_questions(original_text):
+    prompt = f"""
+You are an expert in responsible AI and clinical summarization evaluation.
+
+Your task is to review the following clinical document and generate two curated sets of evaluation questions:
+
+1. **Inclusion Questions**: These assess whether a summary would include all **crucial clinical content**, such as diagnostic findings, key specialist input, test results, long-term medical context, and relevant health history. Frame questions that challenge whether the summary omits any important information or underrepresents any perspective.
+
+2. **Alignment Questions**: These check whether a summary **accurately reflects the meaning, sequence, specificity, and facts** presented in the original document. Frame questions that assess whether the summary distorts, misrepresents, or generalizes key information.
+
+To do this:
+- First, identify the most **clinically important elements** in the document—such as findings, diagnoses, specialist opinions, procedures, genetic or pathology test results, and timelines.
+- Then formulate **10 Inclusion Questions** and **10 Alignment Questions** based on that content. Phrase them so that a reviewer could use them to evaluate whether a summary captures the full context and preserves factual integrity.
+
+Respond only with clean JSON in the following format (no markdown or code block wrappers):
+
+{
+  "Inclusion Questions": ["..."],
+  "Alignment Questions": ["..."]
+}
+
+Clinical Document:
+{original_text}
+"""
+
+    response = model.generate_content(prompt)
+    raw_text = response.text
+    cleaned_text = clean_json_text(raw_text)
+    return json.loads(cleaned_text)
+
+# -------------------------------
+# SCORE THE SUMMARY
+# -------------------------------
+def score_summary(original_text, summary_text, questions_dict):
+    prompt = f"""
+You are a responsible AI evaluator. Using the original text and the summary, answer the following questions.
+For each question, provide:
+- A brief justification
+- A score between 0 and 1
+
+Format:
+{
+  "Inclusion": [{"question": "...", "justification": "...", "score": float}}, ...],
+  "Alignment": [{"question": "...", "justification": "...", "score": float}}, ...]
+}
+
+Original Text:
+{original_text}
+
+Summary:
+{summary_text}
+
+Questions:
+{json.dumps(questions_dict, indent=2)}
+"""
+    response = model.generate_content(prompt)
+    raw_text = response.text
+    cleaned_text = clean_json_text(raw_text)
+    return json.loads(cleaned_text)
+
+# -------------------------------
+# CALCULATE FINAL SCORE
+# -------------------------------
+def calculate_avg(scores_list):
+    return sum(item["score"] for item in scores_list) / len(scores_list)
+
+# -------------------------------
+# FULL SCORING PIPELINE
+# -------------------------------
+def run_scoring_pipeline(bucket_name, zip_path):
+    summary_text, original_text = run_pipeline(bucket_name, zip_path)
+
+    print("\n🔍 Generating Evaluation Questions...")
+    questions = generate_eval_questions(original_text)
+
+    print("\n📊 Scoring the Summary...")
+    scored = score_summary(original_text, summary_text, questions)
+
+    inclusion_score = calculate_avg(scored["Inclusion"])
+    alignment_score = calculate_avg(scored["Alignment"])
+
+    return {
+        "Inclusion Questions": questions["Inclusion Questions"],
+        "Alignment Questions": questions["Alignment Questions"],
+        "Inclusion Score": round(inclusion_score, 2),
+        "Alignment Score": round(alignment_score, 2),
+        "Detailed Scores": scored
+    }
+
+# -------------------------------
+# MAIN EXECUTION
+# -------------------------------
+if __name__ == "__main__":
+    BUCKET_NAME = "gcs-dev-use1-ai-storage-03"
+    ZIP_FILE_PATH = "intake-summary/Breast.zip"
+
+    result = run_scoring_pipeline(BUCKET_NAME, ZIP_FILE_PATH)
+
+    print("\n Inclusion Score:", result["Inclusion Score"])
+    print(" Alignment Score:", result["Alignment Score"])
+    print("\n Detailed Scores:")
+    print(json.dumps(result["Detailed Scores"], indent=2))
+
