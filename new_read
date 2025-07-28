@@ -557,3 +557,87 @@ print("\n✅ Combined Summary:\n")
 print(full_summary)
 print("\n✅ Combined Raw Text saved to 'all_pdf_texts.txt'")
 print("\n✅ PDFs saved to ./processed_pdfs/")
+
+
+---------------------------------------------------------------------
+import zipfile
+import os
+import io
+import pdfplumber
+from google.cloud import storage
+from vertexai.generative_models import GenerativeModel
+from vertexai import init
+
+# ---------------------------------------------
+# Step 0: Init Vertex AI
+# ---------------------------------------------
+init(project="bhsf-ai-team-projects", location="us-east1")
+
+# ---------------------------------------------
+# Step 1: Download ZIP from GCS
+# ---------------------------------------------
+gcs_bucket = 'gcs-dev-use1-ai-storage-03'
+gcs_zip_path = 'intake-summary/Lung.zip'
+local_zip_path = '/tmp/Lung.zip'
+
+storage_client = storage.Client()
+bucket = storage_client.bucket(gcs_bucket)
+blob = bucket.blob(gcs_zip_path)
+blob.download_to_filename(local_zip_path)
+
+# ---------------------------------------------
+# Step 2: Extract and Collect Raw Text
+# ---------------------------------------------
+raw_texts = []
+model = GenerativeModel("gemini-2.5-flash-lite")
+
+# Load summarization prompt
+with open("prompt.txt", "r") as f:
+    prompt = f.read().strip()
+
+with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+    pdf_files = [f for f in zip_ref.namelist() if f.lower().endswith(".pdf")]
+    
+    for idx, pdf_file in enumerate(pdf_files, 1):
+        print(f"📄 Reading PDF ({idx}/{len(pdf_files)}): {pdf_file}")
+        
+        with zip_ref.open(pdf_file) as f:
+            pdf_bytes = f.read()
+
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+
+        raw_entry = f"==== {pdf_file} ====\n{text.strip()}"
+        raw_texts.append(raw_entry)
+
+# ---------------------------------------------
+# Step 3: Save Raw Text
+# ---------------------------------------------
+full_raw_text = "\n\n".join(raw_texts)
+with open("all_pdf_texts.txt", "w") as f:
+    f.write(full_raw_text)
+
+print("\n📄 Raw text saved to 'all_pdf_texts.txt'")
+
+# ---------------------------------------------
+# Step 4: Generate Combined Summary
+# ---------------------------------------------
+print("\n✨ Generating combined summary...\n")
+combined_prompt = f"{prompt}\n\n{full_raw_text}"
+
+response = model.generate_content(
+    combined_prompt,
+    generation_config={"temperature": 0.4, "max_output_tokens": 2048},
+)
+
+combined_summary = response.text.strip()
+
+with open("combined_summary.txt", "w") as f:
+    f.write(combined_summary)
+
+print("✅ Combined summary saved to 'combined_summary.txt'\n")
+
