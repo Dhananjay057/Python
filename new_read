@@ -460,3 +460,100 @@ if __name__ == "__main__":
     print("\n🧾 Detailed Scores:")
     print(json.dumps(result["Detailed Scores"], indent=2))
 
+----------------------------------------------------------------------------------------------
+
+import zipfile
+import os
+import io
+import pdfplumber
+from google.cloud import storage
+from vertexai.generative_models import GenerativeModel
+from vertexai import init
+
+# ---------------------------------------------
+# Step 0: Init Vertex AI
+# ---------------------------------------------
+init(project="bhsf-ai-team-projects", location="us-east1")
+
+# ---------------------------------------------
+# Step 1: Download ZIP from GCS
+# ---------------------------------------------
+gcs_bucket = 'gcs-dev-use1-ai-storage-03'
+gcs_zip_path = 'intake-summary/Lung.zip'
+local_zip_path = '/tmp/Lung.zip'
+
+storage_client = storage.Client()
+bucket = storage_client.bucket(gcs_bucket)
+blob = bucket.blob(gcs_zip_path)
+blob.download_to_filename(local_zip_path)
+
+# ---------------------------------------------
+# Step 2: Extract and Process PDFs with pdfplumber
+# ---------------------------------------------
+summary_outputs = []
+raw_texts = []
+model = GenerativeModel("gemini-2.5-flash-lite")
+
+# Read prompt
+with open("prompt.txt", "r") as f:
+    prompt_template = f.read().strip()
+
+# Create output folder to save extracted PDFs
+os.makedirs("./processed_pdfs", exist_ok=True)
+
+with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
+    all_files = zip_ref.namelist()
+    pdf_files = [f for f in all_files if f.lower().endswith(".pdf")]
+    total_files = len(pdf_files)
+
+    for idx, pdf_file in enumerate(pdf_files, 1):
+        print(f"📄 Processing ({idx}/{total_files}): {pdf_file}")
+
+        # Read PDF bytes
+        with zip_ref.open(pdf_file) as f:
+            pdf_bytes = f.read()
+
+        # Save a local copy for visibility/debug
+        local_pdf_path = f"./processed_pdfs/{os.path.basename(pdf_file)}"
+        with open(local_pdf_path, "wb") as out_f:
+            out_f.write(pdf_bytes)
+
+        # Extract text using pdfplumber
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page in pdf.pages:
+                content = page.extract_text()
+                if content:
+                    text += content + "\n"
+
+        # Keep raw text unmodified
+        raw_text_entry = f"==== {pdf_file} ====\n{text.strip()}"
+        raw_texts.append(raw_text_entry)
+
+        # Prepare prompt with filename context
+        prompt = f"{prompt_template}\n\n{raw_text_entry}"
+
+        # Generate summary based on the extracted text
+        response = model.generate_content(
+            prompt,
+            generation_config={"temperature": 0.4, "max_output_tokens": 1024},
+        )
+
+        # Store summary
+        summary_outputs.append(f"📄 **{pdf_file}**:\n{response.text.strip()}")
+
+# ---------------------------------------------
+# Step 3: Combine All Summaries and Raw Text
+# ---------------------------------------------
+full_summary = "\n\n".join(summary_outputs)
+full_raw_text = "\n\n".join(raw_texts)
+
+# Save raw text
+with open("all_pdf_texts.txt", "w") as raw_text_file:
+    raw_text_file.write(full_raw_text)
+
+# Output
+print("\n✅ Combined Summary:\n")
+print(full_summary)
+print("\n✅ Combined Raw Text saved to 'all_pdf_texts.txt'")
+print("\n✅ PDFs saved to ./processed_pdfs/")
