@@ -232,3 +232,76 @@ if __name__ == "__main__":
     print(" Alignment Score:", result["Alignment Score"])
     print("\n Detailed Scores:")
     print(json.dumps(result["Detailed Scores"], indent=2))
+
+
+_____________________________________________________________________________________
+
+prompt- question
+
+
+f"""
+    You are an AI Expert tasked with reviewing an **Intake Nurse Narrative** and transforming it into a list of structured **question-answer (QA) pairs**. Additionally, you will evaluate whether the **summary** of the narrative correctly reflects its content through two distinct sets of questions: **Inclusion** and **Alignment**.
+
+    ### 🔍 **Instructions:**
+    
+    1. **Inclusion Questions**: 
+       * These questions assess whether **all critical facts** from the **Intake Nurse Narrative** are **included** in the **summary**.
+       * For every important detail in the narrative (such as vital signs, medical history, symptoms, medications, allergies, etc.), create a **question** asking if that information is **present** in the summary.
+       * **Generate 10 questions**. The **answer** should be whether or not the **fact is included** in the summary.
+    
+    2. **Alignment Questions**: 
+       * These questions assess whether the **facts and meaning** of the **Intake Nurse Narrative** are **accurately represented** in the **summary**.
+       * For every key detail (such as vitals, symptoms, history, medications, etc.), create a **question** asking if the **summary correctly reflects** the **detail** and its **meaning**, **sequence**, and **specificity**.
+       * **Generate 10 questions**. The **answer** should be whether or not the **fact is accurately represented** in the summary.
+    
+    ### Example:
+    
+    1. **Inclusion Question**: 
+       - "Does the summary include the patient's blood pressure on arrival?"
+       - "Yes, the summary mentions the patient's blood pressure as 138/88 mmHg."
+    
+    2. **Alignment Question**: 
+       - "Does the summary accurately reflect the patient's blood pressure?"
+       - "Yes, the summary correctly states that the patient's blood pressure was 138/88 mmHg."
+    
+    ### Format:
+    - **Inclusion Questions** should focus on whether key facts are present in the summary.
+    - **Alignment Questions** should focus on whether the facts in the summary are accurately represented, with their correct meaning, sequence, and specificity.
+    - Each question should be phrased clearly and concisely. 
+    - Answers should be short, factual, and reflect the truth based strictly on the content of the narrative and summary.
+    
+    ### Output Format:
+    Respond with a JSON array containing two sections: **Inclusion Questions** and **Alignment Questions**. Each section should contain **question-answer pairs**. Generate exactly 10 questions in each section. 
+    ```json
+    {{
+      "Inclusion Questions": [
+        {{
+          "question": "What was the patient's blood pressure on arrival?",
+          "answer": "138/88 mmHg"
+        }},
+        {{
+          "question": "Is the patient allergic to any medication?",
+          "answer": "No"
+        }}
+        // Add other inclusion questions...
+      ],
+      "Alignment Questions": [
+        {{
+          "question": "Does the summary accurately reflect the patient's blood pressure?",
+          "answer": "Yes, the summary mentions the patient's blood pressure as 138/88 mmHg."
+        }},
+        {{
+          "question": "Does the summary correctly reflect the patient's allergy status?",
+          "answer": "Yes, the summary correctly states that the patient is not allergic to any medication."
+        }}
+        // Add other alignment questions...
+      ]
+    }}
+    ```
+
+    ### Clinical Narrative:
+    {original_text}
+
+    ### Summary:
+    {summary_text}
+    """
